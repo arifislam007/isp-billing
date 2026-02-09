@@ -1,29 +1,53 @@
 <?php
 /**
- * Login Page
+ * Login Page - Fixed Version
  */
 
-require_once 'config.php';
-require_once 'auth.php';
-require_once 'functions.php';
+session_start();
 
 $error = '';
 
 // If already logged in, redirect to dashboard
-if (isLoggedIn()) {
-    redirect('dashboard.php');
+if (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) {
+    header('Location: dashboard.php');
+    exit;
 }
 
+require_once 'config.php';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = sanitize($_POST['username'] ?? '');
+    $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
     
     if (empty($username) || empty($password)) {
         $error = 'Please enter username and password';
-    } elseif (Auth::login($username, $password)) {
-        redirect('dashboard.php');
     } else {
-        $error = 'Invalid username or password';
+        try {
+            $db = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', DB_USER, DB_PASS);
+            $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            
+            $stmt = $db->prepare("SELECT * FROM admin_users WHERE username = ? AND status = 'active'");
+            $stmt->execute([$username]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($user && password_verify($password, $user['password'])) {
+                $_SESSION['admin_id'] = $user['id'];
+                $_SESSION['admin_username'] = $user['username'];
+                $_SESSION['admin_email'] = $user['email'];
+                $_SESSION['admin_full_name'] = $user['full_name'];
+                $_SESSION['admin_role'] = $user['role'];
+                $_SESSION['logged_in'] = true;
+                $_SESSION['login_time'] = time();
+                
+                header('Location: dashboard.php');
+                exit;
+            } else {
+                $error = 'Invalid username or password';
+            }
+        } catch (PDOException $e) {
+            $error = 'Database connection error. Please try again later.';
+            // For debugging: $error = 'DB Error: ' . $e->getMessage();
+        }
     }
 }
 
@@ -65,10 +89,6 @@ $pageTitle = 'Login - ' . APP_NAME;
             color: #6c757d;
             margin-top: 5px;
         }
-        .form-control {
-            border-radius: 5px;
-            padding: 12px 15px;
-        }
         .btn-login {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: none;
@@ -91,14 +111,14 @@ $pageTitle = 'Login - ' . APP_NAME;
         </div>
         
         <?php if ($error): ?>
-            <div class="alert alert-danger"><?php echo $error; ?></div>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
         <?php endif; ?>
         
         <form method="POST" action="">
             <div class="mb-3">
                 <label for="username" class="form-label">Username</label>
                 <input type="text" class="form-control" id="username" name="username" 
-                       placeholder="Enter username" required autofocus>
+                       placeholder="Enter username" required autofocus value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
             </div>
             
             <div class="mb-3">
