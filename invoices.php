@@ -1,252 +1,170 @@
 <?php
 /**
- * Invoices List Page
+ * Invoices Page - Self-contained version
  */
 
+session_start();
+
+if (!isset($_SESSION['admin_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
+require_once 'config.php';
+
 $pageTitle = 'Invoices - ' . APP_NAME;
-require_once 'header.php';
 
-// Handle invoice actions
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    $csrf_token = sanitize($_POST['csrf_token'] ?? '');
+try {
+    $db = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', DB_USER, DB_PASS);
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    if (validateCSRFToken($csrf_token)) {
-        $action = $_POST['action'];
-        $invoice_id = intval($_POST['invoice_id'] ?? 0);
-        
-        if ($action === 'mark_paid' && $invoice_id > 0) {
-            query(
-                "UPDATE invoices SET status = 'paid', paid_date = CURDATE() WHERE id = ?",
-                [$invoice_id],
-                'billing'
-            );
-            setFlashMessage('success', 'Invoice marked as paid!');
-        } elseif ($action === 'cancel' && $invoice_id > 0) {
-            query(
-                "UPDATE invoices SET status = 'cancelled' WHERE id = ?",
-                [$invoice_id],
-                'billing'
-            );
-            setFlashMessage('success', 'Invoice cancelled!');
-        } elseif ($action === 'delete' && $invoice_id > 0) {
-            query("DELETE FROM invoices WHERE id = ?", [$invoice_id], 'billing');
-            setFlashMessage('success', 'Invoice deleted!');
+    // Handle invoice status update
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+        $csrf_token = $_POST['csrf_token'] ?? '';
+        if ($csrf_token === ($_SESSION['csrf_token'] ?? '')) {
+            $action = $_POST['action'];
+            $invoice_id = intval($_POST['invoice_id'] ?? 0);
+            
+            if ($action === 'mark_paid' && $invoice_id > 0) {
+                $stmt = $db->prepare("UPDATE invoices SET status = 'paid', paid_date = CURDATE() WHERE id = ?");
+                $stmt->execute([$invoice_id]);
+            } elseif ($action === 'cancel' && $invoice_id > 0) {
+                $stmt = $db->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = ?");
+                $stmt->execute([$invoice_id]);
+            }
         }
+        header('Location: invoices.php');
+        exit;
     }
-    redirect('invoices.php');
+    
+    $stmt = $db->query("
+        SELECT i.*, CONCAT(c.first_name, ' ', c.last_name) as customer_name, c.username, p.name as package_name
+        FROM invoices i 
+        LEFT JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN packages p ON i.package_id = p.id
+        ORDER BY i.created_at DESC LIMIT 50
+    ");
+    $invoices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+} catch (PDOException $e) {
+    $error = $e->getMessage();
+    $invoices = [];
 }
 
-// Get search and filter parameters
-$search = sanitize($_GET['search'] ?? '');
-$status_filter = sanitize($_GET['status'] ?? '');
-$page = intval($_GET['page'] ?? 1);
-$recordsPerPage = 20;
-
-// Build query
-$where = [];
-$params = [];
-
-if (!empty($search)) {
-    $where[] = "(i.invoice_number LIKE ? OR c.username LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ?)";
-    $searchParam = "%{$search}%";
-    $params = array_merge($params, [$searchParam, $searchParam, $searchParam, $searchParam]);
+// Generate CSRF token
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-if (!empty($status_filter)) {
-    $where[] = "i.status = ?";
-    $params[] = $status_filter;
-}
+$user = ['full_name' => $_SESSION['admin_full_name'] ?? 'Admin'];
 
-$whereClause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
-
-// Get total count
-$totalRecords = fetch(
-    "SELECT COUNT(*) as count FROM invoices i 
-     LEFT JOIN customers c ON i.customer_id = c.id {$whereClause}",
-    $params,
-    'billing'
-)['count'];
-
-// Get invoices with pagination
-$invoices = fetchAll(
-    "SELECT i.*, CONCAT(c.first_name, ' ', c.last_name) as customer_name, c.username,
-     p.name as package_name
-     FROM invoices i 
-     LEFT JOIN customers c ON i.customer_id = c.id
-     LEFT JOIN packages p ON i.package_id = p.id
-     {$whereClause} 
-     ORDER BY i.created_at DESC LIMIT ? OFFSET ?",
-    array_merge($params, [$recordsPerPage, ($page - 1) * $recordsPerPage]),
-    'billing'
-);
-
-$pagination = getPagination($totalRecords, $page, $recordsPerPage);
+function formatCurrency($amount) { return '৳ ' . number_format($amount, 2); }
+function formatDate($date) { return date('Y-m-d', strtotime($date)); }
+function getStatusBadgeClass($status) { $classes = ['active' => 'success', 'inactive' => 'secondary', 'pending' => 'warning', 'paid' => 'success', 'cancelled' => 'danger', 'overdue' => 'danger', 'suspended' => 'warning']; return $classes[$status] ?? 'secondary'; }
+function getStatusLabel($status) { return ucfirst($status); }
+function isOverdue($dueDate, $status) { return $status === 'pending' && strtotime($dueDate) < time(); }
 ?>
 
-<div class="row">
-    <div class="col-lg-12">
-        <div class="card">
-            <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="fas fa-file-invoice me-2"></i>Invoice Management</h5>
-                <a href="add-invoice.php" class="btn btn-sm btn-dark">
-                    <i class="fas fa-plus me-1"></i>Create Invoice
-                </a>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo $pageTitle; ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background: #f8f9fa; min-height: 100vh; }
+        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .card { border: none; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="dashboard.php"><i class="fas fa-network-wired me-2"></i><?php echo APP_NAME; ?></a>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link" href="dashboard.php"><i class="fas fa-tachometer-alt me-1"></i> Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link" href="customers.php"><i class="fas fa-users me-1"></i> Customers</a></li>
+                    <li class="nav-item"><a class="nav-link" href="packages.php"><i class="fas fa-box me-1"></i> Packages</a></li>
+                    <li class="nav-item"><a class="nav-link active" href="invoices.php"><i class="fas fa-file-invoice me-1"></i> Invoices</a></li>
+                    <li class="nav-item"><a class="nav-link" href="payments.php"><i class="fas fa-money-bill-wave me-1"></i> Payments</a></li>
+                    <li class="nav-item"><a class="nav-link" href="nas.php"><i class="fas fa-server me-1"></i> NAS</a></li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"><i class="fas fa-user-circle me-1"></i> <?php echo htmlspecialchars($user['full_name']); ?></a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="profile.php">Profile</a></li>
+                            <li><a class="dropdown-item" href="change-password.php">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="logout.php">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
             </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <?php if (isset($error)): ?>
+        <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+        <?php endif; ?>
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="fas fa-file-invoice me-2"></i>Invoice Management</h2>
+            <a href="add-invoice.php" class="btn btn-warning"><i class="fas fa-plus me-1"></i> Create Invoice</a>
+        </div>
+
+        <div class="card">
             <div class="card-body">
-                <!-- Search and Filter -->
-                <form method="GET" action="" class="mb-4">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <div class="search-box">
-                                <i class="fas fa-search"></i>
-                                <input type="text" class="form-control" name="search" 
-                                       placeholder="Search invoices..." value="<?php echo htmlspecialchars($search); ?>">
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <select class="form-select" name="status">
-                                <option value="">All Statuses</option>
-                                <option value="pending" <?php echo $status_filter === 'pending' ? 'selected' : ''; ?>>Pending</option>
-                                <option value="paid" <?php echo $status_filter === 'paid' ? 'selected' : ''; ?>>Paid</option>
-                                <option value="overdue" <?php echo $status_filter === 'overdue' ? 'selected' : ''; ?>>Overdue</option>
-                                <option value="cancelled" <?php echo $status_filter === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <button type="submit" class="btn btn-primary w-100">
-                                <i class="fas fa-filter me-1"></i>Filter
-                            </button>
-                        </div>
-                        <div class="col-md-3">
-                            <a href="invoices.php" class="btn btn-outline-secondary w-100">
-                                <i class="fas fa-redo me-1"></i>Reset
-                            </a>
-                        </div>
-                    </div>
-                </form>
-                
-                <!-- Invoices Table -->
                 <div class="table-responsive">
-                    <table class="table table-hover" id="invoicesTable">
+                    <table class="table table-hover">
                         <thead>
                             <tr>
                                 <th>Invoice #</th>
                                 <th>Customer</th>
                                 <th>Package</th>
                                 <th>Amount</th>
-                                <th>Billing Period</th>
                                 <th>Due Date</th>
                                 <th>Status</th>
-                                <th class="action-buttons">Actions</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($invoices as $invoice): ?>
-                            <?php $isOverdue = isInvoiceOverdue($invoice['due_date'], $invoice['status']); ?>
-                            <tr data-id="<?php echo $invoice['id']; ?>" class="<?php echo $isOverdue ? 'table-warning' : ''; ?>">
-                                <td>
-                                    <strong><?php echo htmlspecialchars($invoice['invoice_number']); ?></strong>
-                                </td>
-                                <td>
-                                    <?php echo htmlspecialchars($invoice['customer_name'] ?? 'N/A'); ?>
-                                    <br>
-                                    <small class="text-muted">@<?php echo htmlspecialchars($invoice['username'] ?? 'N/A'); ?></small>
-                                </td>
+                            <?php $overdue = isOverdue($invoice['due_date'], $invoice['status']); ?>
+                            <tr class="<?php echo $overdue ? 'table-warning' : ''; ?>">
+                                <td><strong><?php echo htmlspecialchars($invoice['invoice_number']); ?></strong></td>
+                                <td><?php echo htmlspecialchars($invoice['customer_name'] ?? 'N/A'); ?><br><small class="text-muted">@<?php echo htmlspecialchars($invoice['username'] ?? 'N/A'); ?></small></td>
                                 <td><?php echo htmlspecialchars($invoice['package_name'] ?? 'N/A'); ?></td>
                                 <td><?php echo formatCurrency($invoice['total_amount']); ?></td>
+                                <td><?php echo formatDate($invoice['due_date']); ?><?php if ($overdue): ?><span class="badge bg-danger ms-1">Overdue</span><?php endif; ?></td>
+                                <td><span class="badge bg-<?php echo getStatusBadgeClass($invoice['status']); ?>"><?php echo getStatusLabel($invoice['status']); ?></span></td>
                                 <td>
-                                    <?php echo formatDate($invoice['billing_period_start']); ?> - 
-                                    <?php echo formatDate($invoice['billing_period_end']); ?>
-                                </td>
-                                <td>
-                                    <?php echo formatDate($invoice['due_date']); ?>
-                                    <?php if ($isOverdue): ?>
-                                        <span class="badge bg-danger">Overdue</span>
+                                    <a href="invoice-view.php?id=<?php echo $invoice['id']; ?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a>
+                                    <?php if ($invoice['status'] === 'pending'): ?>
+                                    <form method="POST" action="" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                                        <input type="hidden" name="action" value="mark_paid">
+                                        <input type="hidden" name="invoice_id" value="<?php echo $invoice['id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-success"><i class="fas fa-check"></i></button>
+                                    </form>
                                     <?php endif; ?>
-                                </td>
-                                <td>
-                                    <span class="badge bg-<?php echo getStatusBadgeClass($invoice['status']); ?>">
-                                        <?php echo getStatusLabel($invoice['status']); ?>
-                                    </span>
-                                </td>
-                                <td class="action-buttons">
-                                    <div class="btn-group btn-group-sm">
-                                        <a href="invoice-view.php?id=<?php echo $invoice['id']; ?>" 
-                                           class="btn btn-outline-primary" title="View">
-                                            <i class="fas fa-eye"></i>
-                                        </a>
-                                        <a href="invoice-print.php?id=<?php echo $invoice['id']; ?>" 
-                                           class="btn btn-outline-secondary" title="Print" target="_blank">
-                                            <i class="fas fa-print"></i>
-                                        </a>
-                                        <?php if ($invoice['status'] === 'pending'): ?>
-                                        <form method="POST" action="" class="d-inline">
-                                            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-                                            <input type="hidden" name="action" value="mark_paid">
-                                            <input type="hidden" name="invoice_id" value="<?php echo $invoice['id']; ?>">
-                                            <button type="submit" class="btn btn-outline-success" title="Mark as Paid">
-                                                <i class="fas fa-check"></i>
-                                            </button>
-                                        </form>
-                                        <?php endif; ?>
-                                        <?php if ($invoice['status'] !== 'cancelled'): ?>
-                                        <form method="POST" action="" class="d-inline">
-                                            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-                                            <input type="hidden" name="action" value="cancel">
-                                            <input type="hidden" name="invoice_id" value="<?php echo $invoice['id']; ?>">
-                                            <button type="submit" class="btn btn-outline-warning" title="Cancel">
-                                                <i class="fas fa-ban"></i>
-                                            </button>
-                                        </form>
-                                        <?php endif; ?>
-                                    </div>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
-                            
                             <?php if (empty($invoices)): ?>
-                            <tr>
-                                <td colspan="8" class="text-center py-4">
-                                    <div class="empty-state">
-                                        <i class="fas fa-file-invoice"></i>
-                                        <p class="mb-0">No invoices found</p>
-                                    </div>
-                                </td>
-                            </tr>
+                            <tr><td colspan="7" class="text-center py-4">No invoices found</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
-                
-                <!-- Pagination -->
-                <?php if ($pagination['total_pages'] > 1): ?>
-                <nav aria-label="Page navigation" class="mt-4">
-                    <ul class="pagination justify-content-center mb-0">
-                        <li class="page-item <?php echo !$pagination['has_previous'] ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="?page=<?php echo $page - 1; ?>&search=<?php echo urlencode($search); ?>&status=<?php echo urlencode($status_filter); ?>">
-                                <i class="fas fa-chevron-left"></i>
-                            </a>
-                        </li>
-                        
-                        <?php for ($i = 1; $i <= $pagination['total_pages']; $i++): ?>
-                        <li class="page-item <?php echo $i === $page ? 'active' : ''; ?>">
-                            <a class="page-link" href="?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&status=<?php echo urlencode($status_filter); ?>">
-                                <?php echo $i; ?>
-                            </a>
-                        </li>
-                        <?php endfor; ?>
-                        
-                        <li class="page-item <?php echo !$pagination['has_next'] ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="?page=<?php echo $page + 1; ?>&search=<?php echo urlencode($search); ?>&status=<?php echo urlencode($status_filter); ?>">
-                                <i class="fas fa-chevron-right"></i>
-                            </a>
-                        </li>
-                    </ul>
-                </nav>
-                <?php endif; ?>
             </div>
         </div>
     </div>
-</div>
 
-<?php require_once 'footer.php'; ?>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

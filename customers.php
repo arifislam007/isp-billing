@@ -1,276 +1,202 @@
 <?php
 /**
- * Customers List Page
+ * Customers Page - Self-contained version
  */
 
+session_start();
+
+if (!isset($_SESSION['admin_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
+require_once 'config.php';
+
 $pageTitle = 'Customers - ' . APP_NAME;
-require_once 'header.php';
 
-// Handle status update
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    $csrf_token = sanitize($_POST['csrf_token'] ?? '');
+try {
+    $db = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', DB_USER, DB_PASS);
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    if (validateCSRFToken($csrf_token)) {
-        $action = $_POST['action'];
-        $customer_id = intval($_POST['customer_id'] ?? 0);
-        
-        if ($action === 'update_status' && $customer_id > 0) {
-            $status = sanitize($_POST['status'] ?? '');
-            query(
-                "UPDATE customers SET status = ? WHERE id = ?",
-                [$status, $customer_id],
-                'billing'
-            );
-            setFlashMessage('success', 'Customer status updated successfully!');
-        } elseif ($action === 'delete' && $customer_id > 0) {
-            // Get username to remove from RADIUS
-            $customer = fetch("SELECT username FROM customers WHERE id = ?", [$customer_id], 'billing');
-            if ($customer) {
-                query("DELETE FROM radcheck WHERE username = ?", [$customer['username']], 'radius');
+    // Handle status update or delete
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+        $csrf_token = $_POST['csrf_token'] ?? '';
+        if ($csrf_token === ($_SESSION['csrf_token'] ?? '')) {
+            $action = $_POST['action'];
+            $customer_id = intval($_POST['customer_id'] ?? 0);
+            
+            if ($action === 'update_status' && $customer_id > 0) {
+                $status = $_POST['status'] ?? 'active';
+                $stmt = $db->prepare("UPDATE customers SET status = ? WHERE id = ?");
+                $stmt->execute([$status, $customer_id]);
+            } elseif ($action === 'delete' && $customer_id > 0) {
+                $stmt = $db->prepare("DELETE FROM customers WHERE id = ?");
+                $stmt->execute([$customer_id]);
             }
-            query("DELETE FROM customers WHERE id = ?", [$customer_id], 'billing');
-            setFlashMessage('success', 'Customer deleted successfully!');
         }
+        header('Location: customers.php');
+        exit;
     }
-    redirect('customers.php');
+    
+    // Get search
+    $search = $_GET['search'] ?? '';
+    $status_filter = $_GET['status'] ?? '';
+    
+    $where = '';
+    $params = [];
+    if (!empty($search)) {
+        $where = " WHERE (username LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)";
+        $searchParam = "%{$search}%";
+        $params = array_fill(0, 4, $searchParam);
+    }
+    if (!empty($status_filter)) {
+        $where .= ($where ? ' AND ' : ' WHERE ') . "status = ?";
+        $params[] = $status_filter;
+    }
+    
+    $stmt = $db->prepare("SELECT * FROM customers {$where} ORDER BY created_at DESC LIMIT 50");
+    $stmt->execute($params);
+    $customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+} catch (PDOException $e) {
+    $error = $e->getMessage();
+    $customers = [];
 }
 
-// Get search and filter parameters
-$search = sanitize($_GET['search'] ?? '');
-$status_filter = sanitize($_GET['status'] ?? '');
-$page = intval($_GET['page'] ?? 1);
-$recordsPerPage = 20;
-
-// Build query
-$where = [];
-$params = [];
-
-if (!empty($search)) {
-    $where[] = "(username LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ?)";
-    $searchParam = "%{$search}%";
-    $params = array_merge($params, [$searchParam, $searchParam, $searchParam, $searchParam, $searchParam]);
+// Generate CSRF token
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-if (!empty($status_filter)) {
-    $where[] = "status = ?";
-    $params[] = $status_filter;
+$user = ['full_name' => $_SESSION['admin_full_name'] ?? 'Admin'];
+
+function getStatusBadgeClass($status) { 
+    $classes = ['active' => 'success', 'inactive' => 'secondary', 'pending' => 'warning', 'paid' => 'success', 'cancelled' => 'danger', 'suspended' => 'warning', 'expired' => 'secondary', 'disconnected' => 'danger'];
+    return $classes[$status] ?? 'secondary';
 }
-
-$whereClause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
-
-// Get total count
-$totalRecords = fetch(
-    "SELECT COUNT(*) as count FROM customers {$whereClause}",
-    $params,
-    'billing'
-)['count'];
-
-// Get customers with pagination
-$customers = fetchAll(
-    "SELECT * FROM customers {$whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-    array_merge($params, [$recordsPerPage, ($page - 1) * $recordsPerPage]),
-    'billing'
-);
-
-$pagination = getPagination($totalRecords, $page, $recordsPerPage);
+function getStatusLabel($status) { return ucfirst($status); }
+function formatDate($date) { return date('Y-m-d', strtotime($date)); }
 ?>
 
-<div class="row">
-    <div class="col-lg-12">
-        <div class="card">
-            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="fas fa-users me-2"></i>Customer Management</h5>
-                <a href="add-customer.php" class="btn btn-sm btn-light">
-                    <i class="fas fa-plus me-1"></i>Add New Customer
-                </a>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo $pageTitle; ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background: #f8f9fa; min-height: 100vh; }
+        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .card { border: none; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="dashboard.php"><i class="fas fa-network-wired me-2"></i><?php echo APP_NAME; ?></a>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link" href="dashboard.php"><i class="fas fa-tachometer-alt me-1"></i> Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link active" href="customers.php"><i class="fas fa-users me-1"></i> Customers</a></li>
+                    <li class="nav-item"><a class="nav-link" href="packages.php"><i class="fas fa-box me-1"></i> Packages</a></li>
+                    <li class="nav-item"><a class="nav-link" href="invoices.php"><i class="fas fa-file-invoice me-1"></i> Invoices</a></li>
+                    <li class="nav-item"><a class="nav-link" href="payments.php"><i class="fas fa-money-bill-wave me-1"></i> Payments</a></li>
+                    <li class="nav-item"><a class="nav-link" href="nas.php"><i class="fas fa-server me-1"></i> NAS</a></li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"><i class="fas fa-user-circle me-1"></i> <?php echo htmlspecialchars($user['full_name']); ?></a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="profile.php">Profile</a></li>
+                            <li><a class="dropdown-item" href="change-password.php">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="logout.php">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
             </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <?php if (isset($error)): ?>
+        <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+        <?php endif; ?>
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="fas fa-users me-2"></i>Customer Management</h2>
+            <a href="add-customer.php" class="btn btn-primary"><i class="fas fa-plus me-1"></i> Add New Customer</a>
+        </div>
+
+        <div class="card mb-4">
             <div class="card-body">
-                <!-- Search and Filter -->
-                <form method="GET" action="" class="mb-4">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <div class="search-box">
-                                <i class="fas fa-search"></i>
-                                <input type="text" class="form-control" name="search" 
-                                       placeholder="Search customers..." value="<?php echo htmlspecialchars($search); ?>">
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <select class="form-select" name="status">
-                                <option value="">All Statuses</option>
-                                <option value="active" <?php echo $status_filter === 'active' ? 'selected' : ''; ?>>Active</option>
-                                <option value="inactive" <?php echo $status_filter === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
-                                <option value="suspended" <?php echo $status_filter === 'suspended' ? 'selected' : ''; ?>>Suspended</option>
-                                <option value="disconnected" <?php echo $status_filter === 'disconnected' ? 'selected' : ''; ?>>Disconnected</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <button type="submit" class="btn btn-primary w-100">
-                                <i class="fas fa-filter me-1"></i>Filter
-                            </button>
-                        </div>
-                        <div class="col-md-3">
-                            <a href="customers.php" class="btn btn-outline-secondary w-100">
-                                <i class="fas fa-redo me-1"></i>Reset
-                            </a>
-                        </div>
+                <form method="GET" action="" class="row g-3">
+                    <div class="col-md-4">
+                        <input type="text" class="form-control" name="search" placeholder="Search customers..." value="<?php echo htmlspecialchars($search ?? ''); ?>">
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select" name="status">
+                            <option value="">All Statuses</option>
+                            <option value="active" <?php echo $status_filter === 'active' ? 'selected' : ''; ?>>Active</option>
+                            <option value="inactive" <?php echo $status_filter === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
+                            <option value="suspended" <?php echo $status_filter === 'suspended' ? 'selected' : ''; ?>>Suspended</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-primary w-100">Filter</button>
                     </div>
                 </form>
-                
-                <!-- Customers Table -->
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-hover" id="customersTable">
+                    <table class="table table-hover">
                         <thead>
                             <tr>
                                 <th>Username</th>
                                 <th>Name</th>
                                 <th>Email</th>
                                 <th>Phone</th>
-                                <th>Package</th>
                                 <th>Status</th>
                                 <th>Created</th>
-                                <th class="action-buttons">Actions</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($customers as $customer): ?>
-                            <?php
-                            $package = fetch(
-                                "SELECT p.name FROM customer_packages cp 
-                                 JOIN packages p ON cp.package_id = p.id 
-                                 WHERE cp.customer_id = ? AND cp.status = 'active' 
-                                 ORDER BY cp.created_at DESC LIMIT 1",
-                                [$customer['id']],
-                                'billing'
-                            );
-                            ?>
-                            <tr data-id="<?php echo $customer['id']; ?>">
-                                <td>
-                                    <strong><?php echo htmlspecialchars($customer['username']); ?></strong>
-                                </td>
-                                <td>
-                                    <?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?>
-                                </td>
+                            <tr>
+                                <td><strong><?php echo htmlspecialchars($customer['username']); ?></strong></td>
+                                <td><?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?></td>
                                 <td><?php echo htmlspecialchars($customer['email']); ?></td>
                                 <td><?php echo htmlspecialchars($customer['phone']); ?></td>
-                                <td>
-                                    <?php if ($package): ?>
-                                        <span class="badge bg-info"><?php echo htmlspecialchars($package['name']); ?></span>
-                                    <?php else: ?>
-                                        <span class="text-muted">No package</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <span class="badge bg-<?php echo getStatusBadgeClass($customer['status']); ?>">
-                                        <?php echo getStatusLabel($customer['status']); ?>
-                                    </span>
-                                </td>
+                                <td><span class="badge bg-<?php echo getStatusBadgeClass($customer['status']); ?>"><?php echo getStatusLabel($customer['status']); ?></span></td>
                                 <td><?php echo formatDate($customer['created_at']); ?></td>
-                                <td class="action-buttons">
-                                    <div class="btn-group btn-group-sm">
-                                        <a href="customer-view.php?id=<?php echo $customer['id']; ?>" 
-                                           class="btn btn-outline-primary" title="View">
-                                            <i class="fas fa-eye"></i>
-                                        </a>
-                                        <a href="edit-customer.php?id=<?php echo $customer['id']; ?>" 
-                                           class="btn btn-outline-secondary" title="Edit">
-                                            <i class="fas fa-edit"></i>
-                                        </a>
-                                        <button type="button" class="btn btn-outline-danger" 
-                                                onclick="App.deleteItem('customers.php', <?php echo $customer['id']; ?>, 'Customer deleted successfully!')"
-                                                title="Delete">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </div>
-                                    
-                                    <!-- Status Dropdown -->
-                                    <div class="dropdown d-inline-block ms-1">
-                                        <button class="btn btn-outline-warning btn-sm dropdown-toggle" 
-                                                type="button" data-bs-toggle="dropdown">
-                                            Status
-                                        </button>
-                                        <ul class="dropdown-menu dropdown-menu-end">
-                                            <li><a class="dropdown-item" href="#" 
-                                                   onclick="updateStatus(<?php echo $customer['id']; ?>, 'active'); return false;">
-                                                   <i class="fas fa-check text-success me-2"></i>Active
-                                                   </a></li>
-                                            <li><a class="dropdown-item" href="#" 
-                                                   onclick="updateStatus(<?php echo $customer['id']; ?>, 'inactive'); return false;">
-                                                   <i class="fas fa-pause text-secondary me-2"></i>Inactive
-                                                   </a></li>
-                                            <li><a class="dropdown-item" href="#" 
-                                                   onclick="updateStatus(<?php echo $customer['id']; ?>, 'suspended'); return false;">
-                                                   <i class="fas fa-exclamation-triangle text-warning me-2"></i>Suspended
-                                                   </a></li>
-                                            <li><a class="dropdown-item" href="#" 
-                                                   onclick="updateStatus(<?php echo $customer['id']; ?>, 'disconnected'); return false;">
-                                                   <i class="fas fa-times text-danger me-2"></i>Disconnected
-                                                   </a></li>
-                                        </ul>
-                                    </div>
+                                <td>
+                                    <a href="customer-view.php?id=<?php echo $customer['id']; ?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a>
+                                    <a href="edit-customer.php?id=<?php echo $customer['id']; ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-edit"></i></a>
+                                    <form method="POST" action="" class="d-inline" onsubmit="return confirm('Delete this customer?');">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="customer_id" value="<?php echo $customer['id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                                    </form>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
-                            
                             <?php if (empty($customers)): ?>
-                            <tr>
-                                <td colspan="8" class="text-center py-4">
-                                    <div class="empty-state">
-                                        <i class="fas fa-users"></i>
-                                        <p class="mb-0">No customers found</p>
-                                    </div>
-                                </td>
-                            </tr>
+                            <tr><td colspan="7" class="text-center py-4">No customers found</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
-                
-                <!-- Pagination -->
-                <?php if ($pagination['total_pages'] > 1): ?>
-                <nav aria-label="Page navigation" class="mt-4">
-                    <ul class="pagination justify-content-center mb-0">
-                        <li class="page-item <?php echo !$pagination['has_previous'] ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="?page=<?php echo $page - 1; ?>&search=<?php echo urlencode($search); ?>&status=<?php echo urlencode($status_filter); ?>">
-                                <i class="fas fa-chevron-left"></i>
-                            </a>
-                        </li>
-                        
-                        <?php for ($i = 1; $i <= $pagination['total_pages']; $i++): ?>
-                        <li class="page-item <?php echo $i === $page ? 'active' : ''; ?>">
-                            <a class="page-link" href="?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&status=<?php echo urlencode($status_filter); ?>">
-                                <?php echo $i; ?>
-                            </a>
-                        </li>
-                        <?php endfor; ?>
-                        
-                        <li class="page-item <?php echo !$pagination['has_next'] ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="?page=<?php echo $page + 1; ?>&search=<?php echo urlencode($search); ?>&status=<?php echo urlencode($status_filter); ?>">
-                                <i class="fas fa-chevron-right"></i>
-                            </a>
-                        </li>
-                    </ul>
-                </nav>
-                <?php endif; ?>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Hidden form for status update -->
-<form id="statusForm" method="POST" action="" style="display: none;">
-    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-    <input type="hidden" name="action" value="update_status">
-    <input type="hidden" name="customer_id" id="statusCustomerId">
-    <input type="hidden" name="status" id="statusValue">
-</form>
-
-<script>
-function updateStatus(customerId, status) {
-    document.getElementById('statusCustomerId').value = customerId;
-    document.getElementById('statusValue').value = status;
-    document.getElementById('statusForm').submit();
-}
-</script>
-
-<?php require_once 'footer.php'; ?>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
