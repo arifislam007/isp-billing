@@ -14,13 +14,19 @@ try {
     $db = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', DB_USER, DB_PASS);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    // Check and add columns to packages table
     echo "Checking packages table...\n";
     
     $columns = $db->query("SHOW COLUMNS FROM packages")->fetchAll(PDO::FETCH_COLUMN);
     
+    if (!in_array('nas_id', $columns)) {
+        $db->exec("ALTER TABLE packages ADD COLUMN nas_id INT DEFAULT 0 AFTER status");
+        echo "  - Added nas_id column\n";
+    } else {
+        echo "  - nas_id already exists\n";
+    }
+    
     if (!in_array('speed_down', $columns)) {
-        $db->exec("ALTER TABLE packages ADD COLUMN speed_down VARCHAR(50) DEFAULT NULL AFTER price");
+        $db->exec("ALTER TABLE packages ADD COLUMN speed_down VARCHAR(50) DEFAULT NULL AFTER nas_id");
         echo "  - Added speed_down column\n";
     } else {
         echo "  - speed_down already exists\n";
@@ -41,7 +47,7 @@ try {
     }
     
     if (!in_array('radgroupreply', $columns)) {
-        $db->exec("ALTER TABLE packages ADD COLUMN radgroupreply TEXT DEFAULT NULL AFTER nas_id");
+        $db->exec("ALTER TABLE packages ADD COLUMN radgroupreply TEXT DEFAULT NULL AFTER speed_up");
         echo "  - Added radgroupreply column\n";
     } else {
         echo "  - radgroupreply already exists\n";
