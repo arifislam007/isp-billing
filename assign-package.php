@@ -1,209 +1,204 @@
 <?php
 /**
- * Assign Package to Customer Page
+ * Assign Package Page - Self-contained version
  */
 
+session_start();
+
+if (!isset($_SESSION['admin_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
+require_once 'config.php';
+
 $pageTitle = 'Assign Package - ' . APP_NAME;
-require_once 'header.php';
-
-$customer_id = intval($_GET['customer_id'] ?? 0);
-
-if ($customer_id <= 0) {
-    setFlashMessage('error', 'Invalid customer ID');
-    redirect('customers.php');
-}
-
-$customer = fetch(
-    "SELECT * FROM customers WHERE id = ?",
-    [$customer_id],
-    'billing'
-);
-
-if (!$customer) {
-    setFlashMessage('error', 'Customer not found');
-    redirect('customers.php');
-}
-
-// Get active packages
-$packages = fetchAll(
-    "SELECT * FROM packages WHERE status = 'active' ORDER BY price ASC",
-    [],
-    'billing'
-);
-
 $error = '';
+$customer = null;
 
-// Handle form submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $csrf_token = sanitize($_POST['csrf_token'] ?? '');
+try {
+    $db = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', DB_USER, DB_PASS);
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    if (!validateCSRFToken($csrf_token)) {
-        $error = 'Invalid form submission';
-    } else {
-        $package_id = intval($_POST['package_id'] ?? 0);
-        $start_date = sanitize($_POST['start_date'] ?? '');
-        
-        if ($package_id <= 0) {
-            $error = 'Please select a package';
-        } elseif (empty($start_date)) {
-            $error = 'Please select a start date';
-        } else {
-            $package = fetch("SELECT * FROM packages WHERE id = ?", [$package_id], 'billing');
+    $id = intval($_GET['id'] ?? 0);
+    if ($id <= 0) {
+        header('Location: customers.php');
+        exit;
+    }
+    
+    $stmt = $db->prepare("SELECT c.*, p.name as package_name, p.price as package_price, p.speed_down, p.speed_up FROM customers c LEFT JOIN packages p ON c.package_id = p.id WHERE c.id = ?");
+    $stmt->execute([$id]);
+    $customer = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$customer) {
+        header('Location: customers.php');
+        exit;
+    }
+    
+    // Get packages for selection
+    $packages = $db->query("SELECT id, name, price, speed_down, speed_up FROM packages WHERE status = 'active' ORDER BY price")->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Handle form submission
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $csrf_token = $_POST['csrf_token'] ?? '';
+        if ($csrf_token === ($_SESSION['csrf_token'] ?? '')) {
+            $package_id = intval($_POST['package_id'] ?? 0);
+            $router_ip = $_POST['router_ip'] ?? '';
+            $mac_address = $_POST['mac_address'] ?? '';
             
-            if (!$package) {
-                $error = 'Package not found';
-            } else {
-                // Calculate end date
-                $end_date = calculateEndDate($start_date, $package['billing_cycle']);
+            // Update customer
+            $stmt = $db->prepare("UPDATE customers SET package_id=?, router_ip=?, mac_address=? WHERE id=?");
+            $stmt->execute([$package_id, $router_ip, $mac_address, $id]);
+            
+            // Update FreeRADIUS attributes
+            $username = $customer['username'];
+            
+            // Delete old rate limit
+            $stmt = $db->prepare("DELETE FROM radreply WHERE username = ? AND attribute = 'Mikrotik-Rate-Limit'");
+            $stmt->execute([$username]);
+            
+            if ($package_id > 0) {
+                $pkg = null;
+                foreach ($packages as $p) {
+                    if ($p['id'] == $package_id) {
+                        $pkg = $p;
+                        break;
+                    }
+                }
                 
-                // Deactivate existing packages
-                query(
-                    "UPDATE customer_packages SET status = 'cancelled' WHERE customer_id = ? AND status = 'active'",
-                    [$customer_id],
-                    'billing'
-                );
-                
-                // Assign new package
-                query(
-                    "INSERT INTO customer_packages (customer_id, package_id, start_date, end_date, status)
-                     VALUES (?, ?, ?, ?, 'active')",
-                    [$customer_id, $package_id, $start_date, $end_date],
-                    'billing'
-                );
-                
-                // Update RADIUS group reply for speed limits
-                $username = $customer['username'];
-                
-                // Remove existing speed attributes
-                query(
-                    "DELETE FROM radreply WHERE username = ? AND attribute IN ('WISPr-Bandwidth-Max-Down', 'WISPr-Bandwidth-Max-Up', 'Framed-Pool')",
-                    [$username],
-                    'radius'
-                );
-                
-                // Add new speed attributes
-                query(
-                    "INSERT INTO radreply (username, attribute, op, value) VALUES (?, 'WISPr-Bandwidth-Max-Down', ':=', ?)",
-                    [$username, $package['download_speed'] * 1000],
-                    'radius'
-                );
-                
-                query(
-                    "INSERT INTO radreply (username, attribute, op, value) VALUES (?, 'WISPr-Bandwidth-Max-Up', ':=', ?)",
-                    [$username, $package['upload_speed'] * 1000],
-                    'radius'
-                );
-                
-                setFlashMessage('success', 'Package assigned successfully!');
-                redirect('customer-view.php?id=' . $customer_id);
+                if ($pkg && !empty($pkg['speed_down']) || !empty($pkg['speed_up'])) {
+                    $rate_limit = ($pkg['speed_down'] ? $pkg['speed_down'] : '0') . '/' . ($pkg['speed_up'] ? $pkg['speed_up'] : '0');
+                    $stmt = $db->prepare("INSERT INTO radreply (username, attribute, op, value) VALUES (?, 'Mikrotik-Rate-Limit', ':=', ?)");
+                    $stmt->execute([$username, $rate_limit]);
+                }
             }
+            
+            header('Location: customer-view.php?id=' . $id);
+            exit;
         }
     }
+    
+} catch (PDOException $e) {
+    $error = 'Database error: ' . $e->getMessage();
+    $packages = [];
 }
+
+// Generate CSRF token
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+$user = ['full_name' => $_SESSION['admin_full_name'] ?? 'Admin'];
 ?>
 
-<div class="row">
-    <div class="col-lg-8 mx-auto">
-        <div class="card">
-            <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="fas fa-box me-2"></i>Assign Package to Customer</h5>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo $pageTitle; ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background: #f8f9fa; min-height: 100vh; }
+        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .card { border: none; border-radius: 10px; box-shadow: 0 2px/10px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="dashboard.php"><i class="fas fa-network-wired me-2"></i><?php echo APP_NAME; ?></a>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link" href="dashboard.php"><i class="fas fa-tachometer-alt me-1"></i> Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link active" href="customers.php"><i class="fas fa-users me-1"></i> Customers</a></li>
+                    <li class="nav-item"><a class="nav-link" href="packages.php"><i class="fas fa-box me-1"></i> Packages</a></li>
+                    <li class="nav-item"><a class="nav-link" href="invoices.php"><i class="fas fa-file-invoice me-1"></i> Invoices</a></li>
+                    <li class="nav-item"><a class="nav-link" href="payments.php"><i class="fas fa-money-bill-wave me-1"></i> Payments</a></li>
+                    <li class="nav-item"><a class="nav-link" href="nas.php"><i class="fas fa-server me-1"></i> NAS</a></li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"><i class="fas fa-user-circle me-1"></i> <?php echo htmlspecialchars($user['full_name']); ?></a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="profile.php">Profile</a></li>
+                            <li><a class="dropdown-item" href="change-password.php">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="logout.php">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
             </div>
-            <div class="card-body">
-                <?php if ($error): ?>
-                    <div class="alert alert-danger"><?php echo $error; ?></div>
-                <?php endif; ?>
-                
-                <!-- Customer Info -->
-                <div class="alert alert-info mb-4">
-                    <strong>Customer:</strong> <?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?>
-                    <br>
-                    <strong>Username:</strong> <?php echo htmlspecialchars($customer['username']); ?>
-                    <br>
-                    <strong>Current Status:</strong> 
-                    <span class="badge bg-<?php echo getStatusBadgeClass($customer['status']); ?>">
-                        <?php echo getStatusLabel($customer['status']); ?>
-                    </span>
-                </div>
-                
-                <form method="POST" action="">
-                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-                    
-                    <div class="mb-3">
-                        <label for="package_id" class="form-label">Select Package *</label>
-                        <select class="form-select" id="package_id" name="package_id" required onchange="updatePackageInfo(this.value)">
-                            <option value="">-- Select a Package --</option>
-                            <?php foreach ($packages as $pkg): ?>
-                            <option value="<?php echo $pkg['id']; ?>" 
-                                    data-name="<?php echo htmlspecialchars($pkg['name']); ?>"
-                                    data-speed="<?php echo formatSpeed($pkg['download_speed']); ?>"
-                                    data-price="<?php echo formatCurrency($pkg['price']); ?>"
-                                    data-cycle="<?php echo htmlspecialchars($pkg['billing_cycle']); ?>">
-                                <?php echo htmlspecialchars($pkg['name']); ?> - <?php echo formatCurrency($pkg['price']); ?>/<?php echo $pkg['billing_cycle']; ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    
-                    <!-- Package Info Display -->
-                    <div id="packageInfo" class="card mb-3" style="display: none;">
-                        <div class="card-body">
-                            <div class="row text-center">
-                                <div class="col-md-4">
-                                    <i class="fas fa-tachometer-alt text-primary fa-2x mb-2"></i>
-                                    <h5 id="pkgSpeed">0 Mbps</h5>
-                                    <small class="text-muted">Speed</small>
-                                </div>
-                                <div class="col-md-4">
-                                    <i class="fas fa-tag text-success fa-2x mb-2"></i>
-                                    <h5 id="pkgPrice">৳ 0.00</h5>
-                                    <small class="text-muted">Price</small>
-                                </div>
-                                <div class="col-md-4">
-                                    <i class="fas fa-redo text-warning fa-2x mb-2"></i>
-                                    <h5 id="pkgCycle">Monthly</h5>
-                                    <small class="text-muted">Billing Cycle</small>
-                                </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <?php if ($customer): ?>
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h5 class="mb-1"><?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?></h5>
+                                <p class="mb-0 text-muted">@<?php echo htmlspecialchars($customer['username']); ?></p>
                             </div>
-                            <hr>
-                            <p class="mb-0" id="pkgDescription"></p>
+                            <div class="text-end">
+                                <span class="badge bg-<?php echo ($customer['status'] ?? '') === 'active' ? 'success' : 'secondary'; ?>"><?php echo ucfirst($customer['status'] ?? 'Unknown'); ?></span>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div class="mb-3">
-                        <label for="start_date" class="form-label">Start Date *</label>
-                        <input type="date" class="form-control" id="start_date" name="start_date" 
-                               value="<?php echo date('Y-m-d'); ?>" required>
+                </div>
+                <?php endif; ?>
+                
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0"><i class="fas fa-box me-2"></i>Assign Package</h5>
                     </div>
-                    
-                    <div class="d-grid gap-2 d-md-flex">
-                        <button type="submit" class="btn btn-success">
-                            <i class="fas fa-check me-2"></i>Assign Package
-                        </button>
-                        <a href="customer-view.php?id=<?php echo $customer_id; ?>" class="btn btn-secondary">
-                            <i class="fas fa-times me-2"></i>Cancel
-                        </a>
+                    <div class="card-body">
+                        <?php if ($error): ?>
+                            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+                        <?php endif; ?>
+                        
+                        <form method="POST" action="">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Select Package *</label>
+                                <select class="form-select" name="package_id" required>
+                                    <option value="0">-- No Package --</option>
+                                    <?php foreach ($packages as $p): ?>
+                                    <option value="<?php echo $p['id']; ?>" <?php echo ($customer['package_id'] ?? 0) == $p['id'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($p['name']); ?> - ৳ <?php echo number_format($p['price'], 2); ?>
+                                        (<?php echo htmlspecialchars($p['speed_down'] ?: '0'); ?>/<?php echo htmlspecialchars($p['speed_up'] ?: '0'); ?>)
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Router IP</label>
+                                    <input type="text" class="form-control" name="router_ip" value="<?php echo htmlspecialchars($customer['router_ip'] ?? ''); ?>">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">MAC Address</label>
+                                    <input type="text" class="form-control" name="mac_address" value="<?php echo htmlspecialchars($customer['mac_address'] ?? ''); ?>">
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid gap-2 d-md-flex">
+                                <button type="submit" class="btn btn-success"><i class="fas fa-save me-2"></i>Assign Package</button>
+                                <a href="customer-view.php?id=<?php echo $id; ?>" class="btn btn-secondary">Cancel</a>
+                            </div>
+                        </form>
                     </div>
-                </form>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<script>
-function updatePackageInfo(packageId) {
-    const select = document.getElementById('package_id');
-    const option = select.options[select.selectedIndex];
-    const infoDiv = document.getElementById('packageInfo');
-    
-    if (packageId && option) {
-        document.getElementById('pkgSpeed').textContent = option.dataset.speed || 'N/A';
-        document.getElementById('pkgPrice').textContent = option.dataset.price || 'N/A';
-        document.getElementById('pkgCycle').textContent = option.dataset.cycle || 'N/A';
-        infoDiv.style.display = 'block';
-    } else {
-        infoDiv.style.display = 'none';
-    }
-}
-</script>
-
-<?php require_once 'footer.php'; ?>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

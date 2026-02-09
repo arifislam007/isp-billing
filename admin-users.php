@@ -1,72 +1,120 @@
 <?php
 /**
- * Admin Users List Page
+ * Admin Users Page - Self-contained version
  */
 
-$pageTitle = 'Admin Users - ' . APP_NAME;
-require_once 'header.php';
+session_start();
 
-// Only admins can manage admin users
-if (!hasRole('admin')) {
-    setFlashMessage('error', 'Access denied');
-    redirect('dashboard.php');
+if (!isset($_SESSION['admin_id'])) {
+    header('Location: login.php');
+    exit;
 }
 
-// Handle admin user actions
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    $csrf_token = sanitize($_POST['csrf_token'] ?? '');
+require_once 'config.php';
+
+$pageTitle = 'Admin Users - ' . APP_NAME;
+$error = '';
+
+try {
+    $db = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4', DB_USER, DB_PASS);
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    if (validateCSRFToken($csrf_token)) {
-        $action = $_POST['action'];
-        $user_id = intval($_POST['user_id'] ?? 0);
-        
-        if ($action === 'update_status' && $user_id > 0) {
-            $status = sanitize($_POST['status'] ?? '');
-            query(
-                "UPDATE admin_users SET status = ? WHERE id = ?",
-                [$status, $user_id],
-                'billing'
-            );
-            setFlashMessage('success', 'User status updated!');
-        } elseif ($action === 'delete' && $user_id > 0) {
-            // Prevent deleting yourself
-            if ($user_id == Auth::getUserId()) {
-                setFlashMessage('error', 'You cannot delete your own account!');
-            } else {
-                query("DELETE FROM admin_users WHERE id = ?", [$user_id], 'billing');
-                setFlashMessage('success', 'User deleted!');
-            }
+    // Handle delete action
+    if (isset($_GET['delete']) && $_GET['delete'] > 0) {
+        $delete_id = intval($_GET['delete']);
+        if ($delete_id != $_SESSION['admin_id']) {
+            $stmt = $db->prepare("DELETE FROM admin_users WHERE id = ?");
+            $stmt->execute([$delete_id]);
+            header('Location: admin-users.php');
+            exit;
+        } else {
+            $error = 'You cannot delete your own account';
         }
     }
-    redirect('admin-users.php');
+    
+    // Get all admin users
+    $admins = $db->query("SELECT id, username, full_name, email, role, status, created_at FROM admin_users ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+    
+} catch (PDOException $e) {
+    $error = 'Database error: ' . $e->getMessage();
+    $admins = [];
 }
 
-// Get all admin users
-$adminUsers = fetchAll(
-    "SELECT * FROM admin_users ORDER BY created_at DESC",
-    [],
-    'billing'
-);
+$user = ['full_name' => $_SESSION['admin_full_name'] ?? 'Admin'];
+
+// Status badge helper
+function getStatusBadge($status) {
+    return $status === 'active' ? 'bg-success' : 'bg-secondary';
+}
+
+// Role badge helper
+function getRoleBadge($role) {
+    $badges = [
+        'superadmin' => 'bg-danger',
+        'admin' => 'bg-primary',
+        'manager' => 'bg-info text-dark',
+        'support' => 'bg-warning text-dark'
+    ];
+    return $badges[$role] ?? 'bg-secondary';
+}
 ?>
 
-<div class="row">
-    <div class="col-lg-12">
-        <div class="card">
-            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="fas fa-user-shield me-2"></i>Admin User Management</h5>
-                <a href="add-admin.php" class="btn btn-sm btn-light">
-                    <i class="fas fa-plus me-1"></i>Add New Admin
-                </a>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo $pageTitle; ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background: #f8f9fa; min-height: 100vh; }
+        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .card { border: none; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="dashboard.php"><i class="fas fa-network-wired me-2"></i><?php echo APP_NAME; ?></a>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link" href="dashboard.php"><i class="fas fa-tachometer-alt me-1"></i> Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link" href="customers.php"><i class="fas fa-users me-1"></i> Customers</a></li>
+                    <li class="nav-item"><a class="nav-link" href="packages.php"><i class="fas fa-box me-1"></i> Packages</a></li>
+                    <li class="nav-item"><a class="nav-link" href="invoices.php"><i class="fas fa-file-invoice me-1"></i> Invoices</a></li>
+                    <li class="nav-item"><a class="nav-link" href="payments.php"><i class="fas fa-money-bill-wave me-1"></i> Payments</a></li>
+                    <li class="nav-item"><a class="nav-link" href="nas.php"><i class="fas fa-server me-1"></i> NAS</a></li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle active" href="#" data-bs-toggle="dropdown"><i class="fas fa-user-circle me-1"></i> <?php echo htmlspecialchars($user['full_name']); ?></a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="profile.php">Profile</a></li>
+                            <li><a class="dropdown-item" href="change-password.php">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="logout.php">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
             </div>
-            <div class="card-body">
-                <?php if (empty($adminUsers)): ?>
-                <div class="empty-state">
-                    <i class="fas fa-users"></i>
-                    <p class="mb-0">No admin users found.</p>
-                </div>
-                <?php else: ?>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h4 class="mb-0">Admin Users</h4>
+            <a href="add-admin.php" class="btn btn-primary"><i class="fas fa-plus me-2"></i>Add Admin</a>
+        </div>
+        
+        <?php if ($error): ?>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+        <?php endif; ?>
+        
+        <div class="card">
+            <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table class="table table-striped mb-0">
                         <thead>
                             <tr>
                                 <th>Username</th>
@@ -75,67 +123,38 @@ $adminUsers = fetchAll(
                                 <th>Role</th>
                                 <th>Status</th>
                                 <th>Created</th>
-                                <th>Actions</th>
+                                <th class="text-end">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($adminUsers as $user): ?>
-                            <tr data-id="<?php echo $user['id']; ?>">
-                                <td>
-                                    <strong><?php echo htmlspecialchars($user['username']); ?></strong>
-                                </td>
-                                <td><?php echo htmlspecialchars($user['full_name']); ?></td>
-                                <td><?php echo htmlspecialchars($user['email']); ?></td>
-                                <td>
-                                    <span class="badge bg-<?php echo $user['role'] === 'admin' ? 'danger' : ($user['role'] === 'manager' ? 'warning' : 'info'); ?>">
-                                        <?php echo ucfirst($user['role']); ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <span class="badge bg-<?php echo getStatusBadgeClass($user['status']); ?>">
-                                        <?php echo getStatusLabel($user['status']); ?>
-                                    </span>
-                                </td>
-                                <td><?php echo formatDate($user['created_at']); ?></td>
-                                <td>
-                                    <div class="btn-group btn-group-sm">
-                                        <a href="edit-admin.php?id=<?php echo $user['id']; ?>" 
-                                           class="btn btn-outline-primary" title="Edit">
-                                            <i class="fas fa-edit"></i>
-                                        </a>
-                                        <?php if ($user['id'] != Auth::getUserId()): ?>
-                                        <!-- Status Toggle -->
-                                        <form method="POST" action="" class="d-inline">
-                                            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-                                            <input type="hidden" name="action" value="update_status">
-                                            <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
-                                            <input type="hidden" name="status" value="<?php echo $user['status'] === 'active' ? 'inactive' : 'active'; ?>">
-                                            <button type="submit" class="btn btn-outline-warning" 
-                                                    title="<?php echo $user['status'] === 'active' ? 'Deactivate' : 'Activate'; ?>">
-                                                <i class="fas <?php echo $user['status'] === 'active' ? 'fa-pause' : 'fa-play'; ?>"></i>
-                                            </button>
-                                        </form>
-                                        
-                                        <!-- Delete Button -->
-                                        <button type="button" class="btn btn-outline-danger" 
-                                                onclick="App.deleteItem('admin-users.php', <?php echo $user['id']; ?>, 'User deleted!')"
-                                                title="Delete">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                        <?php else: ?>
-                                        <span class="badge bg-secondary align-self-center">You</span>
-                                        <?php endif; ?>
-                                    </div>
+                            <?php foreach ($admins as $admin): ?>
+                            <tr>
+                                <td><strong><?php echo htmlspecialchars($admin['username']); ?></strong></td>
+                                <td><?php echo htmlspecialchars($admin['full_name']); ?></td>
+                                <td><?php echo htmlspecialchars($admin['email'] ?: '-'); ?></td>
+                                <td><span class="badge <?php echo getRoleBadge($admin['role']); ?>"><?php echo ucfirst($admin['role']); ?></span></td>
+                                <td><span class="badge <?php echo getStatusBadge($admin['status']); ?>"><?php echo ucfirst($admin['status']); ?></span></td>
+                                <td><?php echo date('d M Y', strtotime($admin['created_at'])); ?></td>
+                                <td class="text-end">
+                                    <a href="edit-admin.php?id=<?php echo $admin['id']; ?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></a>
+                                    <?php if ($admin['id'] != $_SESSION['admin_id']): ?>
+                                    <a href="admin-users.php?delete=<?php echo $admin['id']; ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this admin?')"><i class="fas fa-trash"></i></a>
+                                    <?php else: ?>
+                                    <span class="text-muted small">You</span>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
+                            <?php if (empty($admins)): ?>
+                            <tr><td colspan="7" class="text-center py-4 text-muted">No admin users found</td></tr>
+                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
-                <?php endif; ?>
             </div>
         </div>
     </div>
-</div>
 
-<?php require_once 'footer.php'; ?>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
