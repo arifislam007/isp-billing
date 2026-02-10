@@ -3,6 +3,7 @@ require_once 'db.php';
 
 $db = new RadDB();
 $stats = $db->getStats();
+$wifiStats = $db->getWifiStats();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -56,6 +57,14 @@ $stats = $db->getStats();
                 <div class="stat-info">
                     <h3>Active Sessions</h3>
                     <p class="stat-number"><?php echo $stats['active_sessions']; ?></p>
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-info">
+                    <h3>Today's Sessions</h3>
+                    <p class="stat-number"><?php echo $wifiStats['today_sessions']; ?></p>
                 </div>
             </div>
         </div>

@@ -249,15 +249,19 @@ $availableGroups = $db->getGroupsForSelect();
                                             <input type="hidden" name="action" value="update_check">
                                             <input type="hidden" name="id" value="<?php echo $attr['id']; ?>">
                                             <td>
-                                                <select name="attribute">
+                                                 <select name="attribute">
                                                     <option value="Cleartext-Password" <?php echo $attr['attribute'] === 'Cleartext-Password' ? 'selected' : ''; ?>>Cleartext-Password</option>
                                                     <option value="MD5-Password" <?php echo $attr['attribute'] === 'MD5-Password' ? 'selected' : ''; ?>>MD5-Password</option>
-                                                    <option value="SHA1-Password" <?php echo $attr['attribute'] === 'SHA1-Password' ? 'selected' : ''; ?>>SHA1-Password</option>
                                                     <option value="NT-Password" <?php echo $attr['attribute'] === 'NT-Password' ? 'selected' : ''; ?>>NT-Password</option>
                                                     <option value="Expiration" <?php echo $attr['attribute'] === 'Expiration' ? 'selected' : ''; ?>>Expiration</option>
                                                     <option value="Max-Daily-Session" <?php echo $attr['attribute'] === 'Max-Daily-Session' ? 'selected' : ''; ?>>Max-Daily-Session</option>
                                                     <option value="Max-Monthly-Session" <?php echo $attr['attribute'] === 'Max-Monthly-Session' ? 'selected' : ''; ?>>Max-Monthly-Session</option>
+                                                    <option value="Max-Session-Timeout" <?php echo $attr['attribute'] === 'Max-Session-Timeout' ? 'selected' : ''; ?>>Max-Session-Timeout</option>
                                                     <option value="Simultaneous-Use" <?php echo $attr['attribute'] === 'Simultaneous-Use' ? 'selected' : ''; ?>>Simultaneous-Use</option>
+                                                    <option value="Session-Timeout" <?php echo $attr['attribute'] === 'Session-Timeout' ? 'selected' : ''; ?>>Session-Timeout</option>
+                                                    <option value="Idle-Timeout" <?php echo $attr['attribute'] === 'Idle-Timeout' ? 'selected' : ''; ?>>Idle-Timeout</option>
+                                                    <option value="WISPr-Bandwidth-Max-Up" <?php echo $attr['attribute'] === 'WISPr-Bandwidth-Max-Up' ? 'selected' : ''; ?>>WISPr-Bandwidth-Max-Up</option>
+                                                    <option value="WISPr-Bandwidth-Max-Down" <?php echo $attr['attribute'] === 'WISPr-Bandwidth-Max-Down' ? 'selected' : ''; ?>>WISPr-Bandwidth-Max-Down</option>
                                                     <option value="Framed-IP-Address" <?php echo $attr['attribute'] === 'Framed-IP-Address' ? 'selected' : ''; ?>>Framed-IP-Address</option>
                                                     <option value="Pool-Name" <?php echo $attr['attribute'] === 'Pool-Name' ? 'selected' : ''; ?>>Pool-Name</option>
                                                 </select>
@@ -297,11 +301,16 @@ $availableGroups = $db->getGroupsForSelect();
                                 <select name="attribute" required>
                                     <option value="Cleartext-Password">Cleartext-Password</option>
                                     <option value="MD5-Password">MD5-Password</option>
-                                    <option value="SHA1-Password">SHA1-Password</option>
+                                    <option value="NT-Password">NT-Password</option>
                                     <option value="Expiration">Expiration</option>
                                     <option value="Max-Daily-Session">Max-Daily-Session</option>
                                     <option value="Max-Monthly-Session">Max-Monthly-Session</option>
+                                    <option value="Max-Session-Timeout">Max-Session-Timeout</option>
                                     <option value="Simultaneous-Use">Simultaneous-Use</option>
+                                    <option value="Session-Timeout">Session-Timeout</option>
+                                    <option value="Idle-Timeout">Idle-Timeout</option>
+                                    <option value="WISPr-Bandwidth-Max-Up">WISPr-Bandwidth-Max-Up</option>
+                                    <option value="WISPr-Bandwidth-Max-Down">WISPr-Bandwidth-Max-Down</option>
                                     <option value="Framed-IP-Address">Framed-IP-Address</option>
                                     <option value="Pool-Name">Pool-Name</option>
                                 </select>
@@ -337,15 +346,19 @@ $availableGroups = $db->getGroupsForSelect();
                                             <td>
                                                 <select name="attribute">
                                                     <option value="Framed-Protocol" <?php echo $attr['attribute'] === 'Framed-Protocol' ? 'selected' : ''; ?>>Framed-Protocol</option>
+                                                    <option value="Service-Type" <?php echo $attr['attribute'] === 'Service-Type' ? 'selected' : ''; ?>>Service-Type</option>
                                                     <option value="Framed-IP-Address" <?php echo $attr['attribute'] === 'Framed-IP-Address' ? 'selected' : ''; ?>>Framed-IP-Address</option>
                                                     <option value="Framed-IP-Netmask" <?php echo $attr['attribute'] === 'Framed-IP-Netmask' ? 'selected' : ''; ?>>Framed-IP-Netmask</option>
                                                     <option value="Framed-Route" <?php echo $attr['attribute'] === 'Framed-Route' ? 'selected' : ''; ?>>Framed-Route</option>
-                                                    <option value="Framed-Compression" <?php echo $attr['attribute'] === 'Framed-Compression' ? 'selected' : ''; ?>>Framed-Compression</option>
+                                                    <option value="Framed-MTU" <?php echo $attr['attribute'] === 'Framed-MTU' ? 'selected' : ''; ?>>Framed-MTU</option>
                                                     <option value="Session-Timeout" <?php echo $attr['attribute'] === 'Session-Timeout' ? 'selected' : ''; ?>>Session-Timeout</option>
                                                     <option value="Idle-Timeout" <?php echo $attr['attribute'] === 'Idle-Timeout' ? 'selected' : ''; ?>>Idle-Timeout</option>
                                                     <option value="Termination-Action" <?php echo $attr['attribute'] === 'Termination-Action' ? 'selected' : ''; ?>>Termination-Action</option>
-                                                    <option value="Service-Type" <?php echo $attr['attribute'] === 'Service-Type' ? 'selected' : ''; ?>>Service-Type</option>
                                                     <option value="Acct-Interim-Interval" <?php echo $attr['attribute'] === 'Acct-Interim-Interval' ? 'selected' : ''; ?>>Acct-Interim-Interval</option>
+                                                    <option value="WISPr-Bandwidth-Max-Up" <?php echo $attr['attribute'] === 'WISPr-Bandwidth-Max-Up' ? 'selected' : ''; ?>>WISPr-Bandwidth-Max-Up</option>
+                                                    <option value="WISPr-Bandwidth-Max-Down" <?php echo $attr['attribute'] === 'WISPr-Bandwidth-Max-Down' ? 'selected' : ''; ?>>WISPr-Bandwidth-Max-Down</option>
+                                                    <option value="WISPr-Redirection" <?php echo $attr['attribute'] === 'WISPr-Redirection' ? 'selected' : ''; ?>>WISPr-Redirection</option>
+                                                    <option value="Mikrotik-Rate-Limit" <?php echo $attr['attribute'] === 'Mikrotik-Rate-Limit' ? 'selected' : ''; ?>>Mikrotik-Rate-Limit</option>
                                                 </select>
                                             </td>
                                             <td>
@@ -378,15 +391,19 @@ $availableGroups = $db->getGroupsForSelect();
                             <div class="form-row">
                                 <select name="attribute" required>
                                     <option value="Framed-Protocol">Framed-Protocol</option>
+                                    <option value="Service-Type">Service-Type</option>
                                     <option value="Framed-IP-Address">Framed-IP-Address</option>
                                     <option value="Framed-IP-Netmask">Framed-IP-Netmask</option>
                                     <option value="Framed-Route">Framed-Route</option>
-                                    <option value="Framed-Compression">Framed-Compression</option>
+                                    <option value="Framed-MTU">Framed-MTU</option>
                                     <option value="Session-Timeout">Session-Timeout</option>
                                     <option value="Idle-Timeout">Idle-Timeout</option>
                                     <option value="Termination-Action">Termination-Action</option>
-                                    <option value="Service-Type">Service-Type</option>
                                     <option value="Acct-Interim-Interval">Acct-Interim-Interval</option>
+                                    <option value="WISPr-Bandwidth-Max-Up">WISPr-Bandwidth-Max-Up</option>
+                                    <option value="WISPr-Bandwidth-Max-Down">WISPr-Bandwidth-Max-Down</option>
+                                    <option value="WISPr-Redirection">WISPr-Redirection</option>
+                                    <option value="Mikrotik-Rate-Limit">Mikrotik-Rate-Limit</option>
                                 </select>
                                 <select name="op">
                                     <option value="=">=</option>

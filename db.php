@@ -301,4 +301,188 @@ class RadDB {
         $stmt->execute([$username]);
         return $stmt->fetchAll();
     }
+    
+    // ==================== WIFI-SPECIFIC ATTRIBUTES ====================
+    
+    /**
+     * Get WiFi-specific check attributes
+     */
+    public function getWifiCheckAttributes() {
+        return [
+            'Cleartext-Password' => 'Cleartext-Password',
+            'NT-Password' => 'NT-Password',
+            'MD5-Password' => 'MD5-Password',
+            'Expiration' => 'Expiration',
+            'Max-Daily-Session' => 'Max-Daily-Session',
+            'Max-Monthly-Session' => 'Max-Monthly-Session',
+            'Max-Session-Timeout' => 'Max-Session-Timeout',
+            'Simultaneous-Use' => 'Simultaneous-Use',
+            'Session-Timeout' => 'Session-Timeout',
+            'Idle-Timeout' => 'Idle-Timeout',
+            'WISPr-Bandwidth-Max-Up' => 'WISPr-Bandwidth-Max-Up',
+            'WISPr-Bandwidth-Max-Down' => 'WISPr-Bandwidth-Max-Down',
+            'WISPr-Session-Terminate-Time' => 'WISPr-Session-Terminate-Time',
+            'ChilliSpot-Max-Total-Gigawords' => 'ChilliSpot-Max-Total-Gigawords',
+            'ChilliSpot-Max-Input-Gigawords' => 'ChilliSpot-Max-Input-Gigawords',
+            'ChilliSpot-Max-Output-Gigawords' => 'ChilliSpot-Max-Output-Gigawords',
+        ];
+    }
+    
+    /**
+     * Get WiFi-specific reply attributes
+     */
+    public function getWifiReplyAttributes() {
+        return [
+            'Framed-Protocol' => 'Framed-Protocol',
+            'Service-Type' => 'Service-Type',
+            'Framed-IP-Address' => 'Framed-IP-Address',
+            'Framed-IP-Netmask' => 'Framed-IP-Netmask',
+            'Framed-Route' => 'Framed-Route',
+            'Framed-MTU' => 'Framed-MTU',
+            'Session-Timeout' => 'Session-Timeout',
+            'Idle-Timeout' => 'Idle-Timeout',
+            'Termination-Action' => 'Termination-Action',
+            'Acct-Interim-Interval' => 'Acct-Interim-Interval',
+            'WISPr-Bandwidth-Max-Up' => 'WISPr-Bandwidth-Max-Up',
+            'WISPr-Bandwidth-Max-Down' => 'WISPr-Bandwidth-Max-Down',
+            'WISPr-Redirection' => 'WISPr-Redirection',
+            'WISPr-Session-Terminate-Time' => 'WISPr-Session-Terminate-Time',
+            'WISPr-Billing-Class' => 'WISPr-Billing-Class',
+            'ChilliSpot-Location' => 'ChilliSpot-Location',
+            'ChilliSpot-Version' => 'ChilliSpot-Version',
+            'Mikrotik-Rate-Limit' => 'Mikrotik-Rate-Limit',
+            'Ascend-Data-Rate' => 'Ascend-Data-Rate',
+            'Ascend-Xmit-Rate' => 'Ascend-Xmit-Rate',
+        ];
+    }
+    
+    /**
+     * Get WiFi NAS types
+     */
+    public function getWifiNasTypes() {
+        return [
+            'wireless' => 'Wireless Access Point',
+            'mikrotik' => 'Mikrotik Router',
+            'ubiquiti' => 'Ubiquiti UniFi',
+            'cisco' => 'Cisco WLC',
+            ' Aruba' => 'Aruba Controller',
+            'meraki' => 'Meraki AP',
+            'tp-link' => 'TP-Link',
+            'openwrt' => 'OpenWRT',
+            'dd-wrt' => 'DD-WRT',
+            'wireless' => 'Generic Wireless',
+        ];
+    }
+    
+    /**
+     * Create WiFi user with common settings
+     */
+    public function createWifiUser($username, $password, $sessionTimeout = '3600', $idleTimeout = '600') {
+        try {
+            $this->pdo->beginTransaction();
+            
+            // Add password check attribute
+            $stmt = $this->pdo->prepare("INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Cleartext-Password', ':=', ?)");
+            $stmt->execute([$username, $password]);
+            
+            // Add service type reply
+            $stmt = $this->pdo->prepare("INSERT INTO radreply (username, attribute, op, value) VALUES (?, 'Service-Type', '=', 'Framed-User')");
+            $stmt->execute([$username]);
+            
+            // Add framed protocol
+            $stmt = $this->pdo->prepare("INSERT INTO radreply (username, attribute, op, value) VALUES (?, 'Framed-Protocol', '=', 'PPP')");
+            $stmt->execute([$username]);
+            
+            // Add session timeout
+            if ($sessionTimeout) {
+                $stmt = $this->pdo->prepare("INSERT INTO radreply (username, attribute, op, value) VALUES (?, 'Session-Timeout', '=', ?)");
+                $stmt->execute([$username, $sessionTimeout]);
+            }
+            
+            // Add idle timeout
+            if ($idleTimeout) {
+                $stmt = $this->pdo->prepare("INSERT INTO radreply (username, attribute, op, value) VALUES (?, 'Idle-Timeout', '=', ?)");
+                $stmt->execute([$username, $idleTimeout]);
+            }
+            
+            $this->pdo->commit();
+            return true;
+        } catch (Exception $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+    
+    /**
+     * Create WiFi hotspot group with bandwidth limits
+     */
+    public function createWifiHotspotGroup($groupname, $uploadSpeed = '512000', $downloadSpeed = '1024000') {
+        try {
+            $this->pdo->beginTransaction();
+            
+            // Add group with auth type
+            $stmt = $this->pdo->prepare("INSERT INTO radgroupcheck (groupname, attribute, op, value) VALUES (?, 'Auth-Type', ':=', 'Accept')");
+            $stmt->execute([$groupname]);
+            
+            // Add service type reply
+            $stmt = $this->pdo->prepare("INSERT INTO radgroupreply (groupname, attribute, op, value) VALUES (?, 'Service-Type', '=', 'Framed-User')");
+            $stmt->execute([$groupname]);
+            
+            // Add framed protocol
+            $stmt = $this->pdo->prepare("INSERT INTO radgroupreply (groupname, attribute, op, value) VALUES (?, 'Framed-Protocol', '=', 'PPP')");
+            $stmt->execute([$groupname]);
+            
+            // Add bandwidth limits (Mikrotik style)
+            if ($uploadSpeed || $downloadSpeed) {
+                $rateLimit = "{$downloadSpeed}k/{$uploadSpeed}k";
+                $stmt = $this->pdo->prepare("INSERT INTO radgroupreply (groupname, attribute, op, value) VALUES (?, 'Mikrotik-Rate-Limit', '=', ?)");
+                $stmt->execute([$groupname, $rateLimit]);
+            }
+            
+            $this->pdo->commit();
+            return true;
+        } catch (Exception $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+    
+    /**
+     * Get WiFi-specific statistics
+     */
+    public function getWifiStats() {
+        $stats = [];
+        
+        // Today's active sessions
+        $stats['today_sessions'] = $this->pdo->query("SELECT COUNT(*) FROM radacct WHERE DATE(acctstarttime) = CURDATE()")->fetch()['count'];
+        
+        // Total data usage today (in bytes)
+        $stats['today_traffic'] = $this->pdo->query("SELECT COALESCE(SUM(acctinputoctets) + SUM(acctoutputoctets), 0) FROM radacct WHERE DATE(acctstarttime) = CURDATE()")->fetch()['count'];
+        
+        // Average session duration
+        $stats['avg_session'] = $this->pdo->query("SELECT COALESCE(AVG(TIMESTAMPDIFF(SECOND, acctstarttime, COALESCE(acctstoptime, NOW()))), 0) FROM radacct WHERE acctstoptime IS NOT NULL")->fetch()['count'];
+        
+        return $stats;
+    }
+    
+    /**
+     * Add WiFi NAS client (Access Point)
+     */
+    public function addWifiNasClient($nasname, $shortname, $type, $secret, $description = '') {
+        return $this->addNasClient($nasname, $shortname, $type, $secret, $description);
+    }
+    
+    /**
+     * Get active WiFi sessions
+     */
+    public function getActiveWifiSessions() {
+        $stmt = $this->pdo->query("
+            SELECT r.*, u.groupname 
+            FROM radacct r 
+            LEFT JOIN radusergroup u ON r.username = u.username 
+            WHERE r.acctstoptime IS NULL 
+            ORDER BY r.acctstarttime DESC
+        ");
+        return $stmt->fetchAll();
+    }
 }

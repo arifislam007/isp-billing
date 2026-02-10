@@ -166,14 +166,19 @@ if (isset($_GET['edit'])) {
                         <label for="type">Type</label>
                         <select id="type" name="type">
                             <option value="other" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'other') ? 'selected' : ''; ?>>Other</option>
-                            <option value="cisco" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'cisco') ? 'selected' : ''; ?>>Cisco</option>
-                            <option value="juniper" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'juniper') ? 'selected' : ''; ?>>Juniper</option>
-                            <option value="mikrotik" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'mikrotik') ? 'selected' : ''; ?>>Mikrotik</option>
+                            <option value="wireless" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'wireless') ? 'selected' : ''; ?>>Wireless Access Point</option>
+                            <option value="mikrotik" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'mikrotik') ? 'selected' : ''; ?>>Mikrotik Router</option>
+                            <option value="ubiquiti" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'ubiquiti') ? 'selected' : ''; ?>>Ubiquiti UniFi</option>
+                            <option value="cisco" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'cisco') ? 'selected' : ''; ?>>Cisco WLC</option>
+                            <option value="aruba" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'aruba') ? 'selected' : ''; ?>>Aruba Controller</option>
+                            <option value="meraki" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'meraki') ? 'selected' : ''; ?>>Meraki AP</option>
+                            <option value="tp-link" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'tp-link') ? 'selected' : ''; ?>>TP-Link</option>
+                            <option value="openwrt" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'openwrt') ? 'selected' : ''; ?>>OpenWRT</option>
+                            <option value="dd-wrt" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'dd-wrt') ? 'selected' : ''; ?>>DD-WRT</option>
                             <option value="huawei" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'huawei') ? 'selected' : ''; ?>>Huawei</option>
+                            <option value="juniper" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'juniper') ? 'selected' : ''; ?>>Juniper</option>
                             <option value="dlink" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'dlink') ? 'selected' : ''; ?>>D-Link</option>
                             <option value="zyxel" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'zyxel') ? 'selected' : ''; ?>>ZyXEL</option>
-                            <option value="compute" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'compute') ? 'selected' : ''; ?>>Compute Server</option>
-                            <option value="wireless" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'wireless') ? 'selected' : ''; ?>>Wireless AP</option>
                             <option value="router" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'router') ? 'selected' : ''; ?>>Router</option>
                             <option value="switch" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'switch') ? 'selected' : ''; ?>>Switch</option>
                             <option value="firewall" <?php echo (isset($editingClient['type']) && $editingClient['type'] === 'firewall') ? 'selected' : ''; ?>>Firewall</option>
